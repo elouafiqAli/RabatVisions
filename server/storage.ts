@@ -1,7 +1,9 @@
 import { landmarks, type Landmark, type InsertLandmark, users, type User, type InsertUser } from "@shared/schema";
-import { Pool } from 'pg';
+import pg from 'pg';
 import { asc, desc, eq, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
+
+const { Pool } = pg;
 
 // Define storage interface
 export interface IStorage {
