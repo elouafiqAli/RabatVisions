@@ -1,8 +1,9 @@
 import { landmarks, type Landmark, type InsertLandmark, users, type User, type InsertUser } from "@shared/schema";
+import { Pool } from 'pg';
+import { asc, desc, eq, and } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 
-// modify the interface with any CRUD methods
-// you might need
-
+// Define storage interface
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -14,6 +15,7 @@ export interface IStorage {
   createLandmark(landmark: InsertLandmark): Promise<Landmark>;
 }
 
+// In-memory storage implementation (for fallback or testing)
 export class MemStorage implements IStorage {
   private users: Map<number, User>;
   private landmarksMap: Map<number, Landmark>;
@@ -244,4 +246,183 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// PostgreSQL database storage implementation
+export class PostgresStorage implements IStorage {
+  private db: ReturnType<typeof drizzle>;
+  private pool: Pool;
+  
+  constructor() {
+    this.pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+    });
+    
+    this.db = drizzle(this.pool);
+    
+    // Initialize the database with seed data if needed
+    this.initialize();
+  }
+  
+  // Initialize database with seed data if empty
+  private async initialize() {
+    try {
+      // Check if we have any landmarks already
+      const existingLandmarks = await this.getLandmarks();
+      
+      // If no landmarks exist, seed the database
+      if (existingLandmarks.length === 0) {
+        console.log('Seeding database with initial landmark data...');
+        
+        // Create temporary MemStorage to get default landmarks
+        const memStorage = new MemStorage();
+        const defaultLandmarks = await memStorage.getLandmarks();
+        
+        // Insert landmarks into the database
+        for (const landmark of defaultLandmarks) {
+          const insertLandmark: InsertLandmark = {
+            name: landmark.name,
+            slug: landmark.slug,
+            description: landmark.description,
+            shortDescription: landmark.shortDescription,
+            imageUrl: landmark.imageUrl,
+            location: landmark.location,
+            openingHours: landmark.openingHours,
+            latitude: landmark.latitude,
+            longitude: landmark.longitude,
+            vrModelUrl: landmark.vrModelUrl,
+            vrSceneConfig: landmark.vrSceneConfig
+          };
+          
+          await this.createLandmark(insertLandmark);
+        }
+        
+        console.log('Database seeded successfully with landmarks.');
+      }
+    } catch (error) {
+      console.error('Error initializing database:', error);
+    }
+  }
+  
+  // User methods
+  async getUser(id: number): Promise<User | undefined> {
+    try {
+      const result = await this.db.select().from(users).where(eq(users.id, id));
+      return result[0];
+    } catch (error) {
+      console.error('Error retrieving user by ID:', error);
+      return undefined;
+    }
+  }
+  
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    try {
+      const result = await this.db.select().from(users).where(eq(users.username, username));
+      return result[0];
+    } catch (error) {
+      console.error('Error retrieving user by username:', error);
+      return undefined;
+    }
+  }
+  
+  async createUser(insertUser: InsertUser): Promise<User> {
+    try {
+      const result = await this.db.insert(users).values(insertUser).returning();
+      return result[0];
+    } catch (error) {
+      console.error('Error creating user:', error);
+      throw error;
+    }
+  }
+  
+  // Landmark methods
+  async getLandmarks(): Promise<Landmark[]> {
+    try {
+      return await this.db.select().from(landmarks);
+    } catch (error) {
+      console.error('Error retrieving landmarks:', error);
+      return [];
+    }
+  }
+  
+  async getLandmarkBySlug(slug: string): Promise<Landmark | undefined> {
+    try {
+      const result = await this.db.select().from(landmarks).where(eq(landmarks.slug, slug));
+      return result[0];
+    } catch (error) {
+      console.error('Error retrieving landmark by slug:', error);
+      return undefined;
+    }
+  }
+  
+  async createLandmark(landmark: InsertLandmark): Promise<Landmark> {
+    try {
+      const result = await this.db.insert(landmarks).values(landmark).returning();
+      return result[0];
+    } catch (error) {
+      console.error('Error creating landmark:', error);
+      throw error;
+    }
+  }
+}
+
+// Create database tables
+export async function createTables(storage: PostgresStorage) {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+  });
+  
+  try {
+    // Create users table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password TEXT NOT NULL
+      )
+    `);
+    
+    // Create landmarks table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS landmarks (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL,
+        short_description TEXT NOT NULL,
+        image_url TEXT NOT NULL,
+        location TEXT NOT NULL,
+        opening_hours TEXT NOT NULL,
+        latitude TEXT NOT NULL,
+        longitude TEXT NOT NULL,
+        vr_model_url TEXT,
+        vr_scene_config JSONB
+      )
+    `);
+    
+    console.log('Database tables created successfully');
+  } catch (error) {
+    console.error('Error creating database tables:', error);
+    throw error;
+  } finally {
+    await pool.end();
+  }
+}
+
+// Export the storage implementation based on environment
+let storage: IStorage;
+
+if (process.env.DATABASE_URL) {
+  console.log('Using PostgreSQL database storage');
+  storage = new PostgresStorage();
+  
+  // Create tables if they don't exist
+  createTables(storage as PostgresStorage).catch(error => {
+    console.error('Failed to create database tables:', error);
+    console.log('Falling back to in-memory storage...');
+    storage = new MemStorage();
+  });
+} else {
+  console.log('DATABASE_URL not found, using in-memory storage');
+  storage = new MemStorage();
+}
+
+export { storage };

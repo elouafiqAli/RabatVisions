@@ -23,16 +23,27 @@ export default function MapView({
   useEffect(() => {
     if (!window.mapboxgl || !mapContainerRef.current) return;
     
-    // Mapbox token - in production this should be in env var
-    mapboxgl.accessToken = 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4M29iazA2Z2gycXA4N2pmbDZmangifQ.-g_vE53SD2WrJ6tFX7QHmA';
+    // Get Mapbox token from environment variable
+    const mapboxToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+    
+    // Set access token
+    mapboxgl.accessToken = mapboxToken || '';
+    
+    // Log token availability for debugging (not the actual token)
+    console.log('Mapbox token available:', !!mapboxToken);
     
     // Create the map centered on Rabat
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/streets-v11',
       center: [-6.8326, 34.0209], // Rabat coordinates
-      zoom: 12
+      zoom: 12.5,
+      pitch: 40, // Add some tilt for a more immersive view
+      bearing: 20 // Slight rotation for better perspective
     });
+    
+    // Add navigation controls (zoom in/out, rotation)
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
     
     // Save map instance to ref
     mapRef.current = map;
@@ -65,10 +76,14 @@ export default function MapView({
       const markerHTML = `
         <div class="map-marker cursor-pointer group">
           <div class="flex flex-col items-center">
-            <div class="h-6 w-6 bg-primary rounded-full flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
-              <i class="bx bxs-map-pin text-white"></i>
+            <div class="h-8 w-8 ${landmark.id === selectedLandmark?.id ? 'bg-accent scale-125' : 'bg-primary'} 
+              rounded-full flex items-center justify-center shadow-lg transform 
+              group-hover:scale-110 transition-all duration-300 ease-in-out
+              ${landmark.id === selectedLandmark?.id ? 'ring-4 ring-accent/30' : ''}">
+              <i class="bx bxs-map-pin text-white text-lg"></i>
             </div>
-            <div class="absolute bottom-full mb-2 bg-white px-3 py-1 rounded-lg shadow-md opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="absolute bottom-full mb-2 bg-white px-3 py-1 rounded-lg shadow-md opacity-0 
+              group-hover:opacity-100 transition-opacity duration-200">
               <span class="text-sm font-medium whitespace-nowrap">${landmark.name}</span>
             </div>
           </div>
